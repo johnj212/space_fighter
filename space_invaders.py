@@ -3,6 +3,7 @@ import random
 import sys
 import os
 import time
+import math
 
 # Initialize Pygame
 pygame.init()
@@ -31,9 +32,70 @@ player_image = pygame.image.load('player.png').convert_alpha()
 alien_image = pygame.image.load('alien.png').convert_alpha()
 bullet_image = pygame.image.load('bullet.png').convert_alpha()
 power_up_image = pygame.image.load('power_up.png').convert_alpha()
+boss_image = pygame.image.load('boss.png').convert_alpha()  # Add boss image
 
 # Scale down the alien image
 alien_image = pygame.transform.scale(alien_image, (30, 30))  # Reduced size
+boss_image = pygame.transform.scale(boss_image, (100, 100))  # Scale boss image
+
+# Starfield
+class Star:
+    def __init__(self):
+        self.x = random.randint(0, WIDTH)
+        self.y = random.randint(0, HEIGHT)
+        self.size = random.randint(1, 3)
+        self.speed = random.uniform(0.1, 0.5)
+        self.brightness = random.randint(100, 255)
+
+# Create stars
+stars = [Star() for _ in range(200)]
+
+# Boss class
+class Boss:
+    def __init__(self, level):
+        self.health = 100 * level
+        self.max_health = self.health
+        self.x = WIDTH // 2
+        self.y = 100
+        self.speed = 2
+        self.attack_pattern = 0
+        self.attack_timer = 0
+        self.width, self.height = boss_image.get_size()
+        self.movement_direction = 1
+        self.movement_range = 300
+        self.start_x = self.x
+
+    def update(self):
+        # Movement pattern
+        self.x += self.speed * self.movement_direction
+        if abs(self.x - self.start_x) > self.movement_range:
+            self.movement_direction *= -1
+
+        # Attack pattern
+        self.attack_timer += 1
+        if self.attack_timer >= 60:  # Attack every second
+            self.attack_pattern = (self.attack_pattern + 1) % 3
+            self.attack_timer = 0
+
+    def shoot(self):
+        bullets = []
+        if self.attack_pattern == 0:  # Single shot
+            bullets.append([self.x + self.width // 2, self.y + self.height])
+        elif self.attack_pattern == 1:  # Spread shot
+            for angle in range(-30, 31, 15):
+                rad = math.radians(angle)
+                bullets.append([
+                    self.x + self.width // 2 + math.sin(rad) * 20,
+                    self.y + self.height + math.cos(rad) * 20
+                ])
+        else:  # Circle shot
+            for angle in range(0, 360, 45):
+                rad = math.radians(angle)
+                bullets.append([
+                    self.x + self.width // 2 + math.sin(rad) * 20,
+                    self.y + self.height // 2 + math.cos(rad) * 20
+                ])
+        return bullets
 
 # Game state
 class GameState:
@@ -52,6 +114,8 @@ class GameState:
         self.show_level_transition = False
         self.transition_timer = 0
         self.transition_duration = 2.0  # seconds
+        self.boss_active = False
+        self.boss = None
 
     def advance_level(self):
         # Clear all game objects
@@ -75,6 +139,11 @@ class GameState:
         # Start transition animation
         self.show_level_transition = True
         self.transition_timer = time.time()
+
+        # Spawn boss every 3 levels
+        if self.level % 3 == 0:
+            self.boss_active = True
+            self.boss = Boss(self.level)
 
     def update_transition(self):
         if self.show_level_transition:
@@ -192,6 +261,20 @@ while running:
                 game_state.advance_level()
         elif not game_state.show_level_transition:
             # Normal gameplay
+            # Update stars
+            for star in stars:
+                star.y += star.speed
+                if star.y > HEIGHT:
+                    star.y = 0
+                    star.x = random.randint(0, WIDTH)
+
+            # Update boss if active
+            if game_state.boss_active and game_state.boss:
+                game_state.boss.update()
+                if random.randint(1, 30) == 1:  # Boss shooting frequency
+                    new_bullets = game_state.boss.shoot()
+                    alien_bullets.extend(new_bullets)
+
             # Player movement
             keys = pygame.key.get_pressed()
             if keys[pygame.K_LEFT] and player_x > 0:
@@ -302,6 +385,11 @@ while running:
     # Draw everything
     screen.fill(BLACK)
     
+    # Draw stars
+    for star in stars:
+        pygame.draw.circle(screen, (star.brightness, star.brightness, star.brightness),
+                         (int(star.x), int(star.y)), star.size)
+    
     # Draw level transition if active
     if game_state.show_level_transition:
         transition_text = game_font.render(f'LEVEL {game_state.level}', True, WHITE)
@@ -316,6 +404,19 @@ while running:
                                         player_width + 10, player_height + 10)
                 pygame.draw.rect(screen, BLUE, shield_rect, 2)
             screen.blit(player_image, (player_x, player_y))
+        
+        # Draw boss if active
+        if game_state.boss_active and game_state.boss:
+            screen.blit(boss_image, (game_state.boss.x, game_state.boss.y))
+            # Draw boss health bar
+            health_width = 100
+            health_height = 10
+            health_x = game_state.boss.x + (game_state.boss.width - health_width) // 2
+            health_y = game_state.boss.y - 20
+            pygame.draw.rect(screen, RED, (health_x, health_y, health_width, health_height))
+            pygame.draw.rect(screen, GREEN, (health_x, health_y,
+                                           health_width * (game_state.boss.health / game_state.boss.max_health),
+                                           health_height))
         
         for alien in aliens:
             screen.blit(alien_image, (alien['x'], alien['y']))
