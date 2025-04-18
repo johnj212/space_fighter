@@ -3,6 +3,8 @@
 ## Overview
 Space Invaders is a classic arcade-style game where players control a spaceship to defeat waves of aliens and bosses. The game features power-ups, level progression, and enhanced gameplay mechanics.
 
+Create using Cursor AI
+
 ## Recent Changes
 
 ### 1. Power-Up System
