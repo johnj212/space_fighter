@@ -45,3 +45,8 @@ ENV/
 
 # VS Code specific
 .vscode/
+
+# Cursor specific
+.cursorrules
+refresh.md
+refresh.md
