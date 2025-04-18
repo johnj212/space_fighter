@@ -4,9 +4,15 @@ import sys
 import os
 import time
 import math
+import argparse  # Add argparse for command line arguments
 
 # Initialize Pygame
 pygame.init()
+
+# Set up command line arguments
+parser = argparse.ArgumentParser(description='Space Invaders Game')
+parser.add_argument('--level', type=int, default=1, help='Starting level (default: 1)')
+args = parser.parse_args()
 
 # Screen dimensions
 WIDTH, HEIGHT = 800, 600
@@ -57,13 +63,18 @@ class Boss:
         self.max_health = self.health
         self.x = WIDTH // 2
         self.y = 100
-        self.speed = 2
+        self.speed = 2 + (level - 1) * 0.5  # Scale speed with level
         self.attack_pattern = 0
         self.attack_timer = 0
         self.width, self.height = boss_image.get_size()
         self.movement_direction = 1
         self.movement_range = 300
         self.start_x = self.x
+        self.hit_timer = 0  # For visual feedback when hit
+        self.invulnerable = False  # For attack pattern transitions
+        self.invulnerable_timer = 0
+        self.phase = 1  # Boss battle phases
+        self.phase_health_threshold = self.health * 0.5  # Phase change at 50% health
 
     def update(self):
         # Movement pattern
@@ -71,37 +82,78 @@ class Boss:
         if abs(self.x - self.start_x) > self.movement_range:
             self.movement_direction *= -1
 
+        # Handle invulnerability
+        if self.invulnerable:
+            self.invulnerable_timer -= 1
+            if self.invulnerable_timer <= 0:
+                self.invulnerable = False
+
         # Attack pattern
         self.attack_timer += 1
         if self.attack_timer >= 60:  # Attack every second
             self.attack_pattern = (self.attack_pattern + 1) % 3
             self.attack_timer = 0
+            # Become invulnerable briefly during pattern change
+            self.invulnerable = True
+            self.invulnerable_timer = 30
+
+        # Phase transition
+        if self.health <= self.phase_health_threshold and self.phase == 1:
+            self.phase = 2
+            self.speed *= 1.5  # Increase speed in phase 2
+            self.invulnerable = True
+            self.invulnerable_timer = 60  # Longer invulnerability during phase change
 
     def shoot(self):
         bullets = []
-        if self.attack_pattern == 0:  # Single shot
-            bullets.append([self.x + self.width // 2, self.y + self.height])
-        elif self.attack_pattern == 1:  # Spread shot
-            for angle in range(-30, 31, 15):
-                rad = math.radians(angle)
-                bullets.append([
-                    self.x + self.width // 2 + math.sin(rad) * 20,
-                    self.y + self.height + math.cos(rad) * 20
-                ])
-        else:  # Circle shot
-            for angle in range(0, 360, 45):
-                rad = math.radians(angle)
-                bullets.append([
-                    self.x + self.width // 2 + math.sin(rad) * 20,
-                    self.y + self.height // 2 + math.cos(rad) * 20
-                ])
+        if self.invulnerable:
+            return bullets  # Don't shoot while invulnerable
+
+        if self.phase == 1:
+            if self.attack_pattern == 0:  # Single shot
+                bullets.append([self.x + self.width // 2, self.y + self.height])
+            elif self.attack_pattern == 1:  # Spread shot
+                for angle in range(-30, 31, 15):
+                    rad = math.radians(angle)
+                    bullets.append([
+                        self.x + self.width // 2 + math.sin(rad) * 20,
+                        self.y + self.height + math.cos(rad) * 20
+                    ])
+            else:  # Circle shot
+                for angle in range(0, 360, 45):
+                    rad = math.radians(angle)
+                    bullets.append([
+                        self.x + self.width // 2 + math.sin(rad) * 20,
+                        self.y + self.height // 2 + math.cos(rad) * 20
+                    ])
+        else:  # Phase 2 - more aggressive patterns
+            if self.attack_pattern == 0:  # Double spread
+                for angle in range(-45, 46, 15):
+                    rad = math.radians(angle)
+                    bullets.append([
+                        self.x + self.width // 2 + math.sin(rad) * 20,
+                        self.y + self.height + math.cos(rad) * 20
+                    ])
+            elif self.attack_pattern == 1:  # Double circle
+                for angle in range(0, 360, 30):
+                    rad = math.radians(angle)
+                    bullets.append([
+                        self.x + self.width // 2 + math.sin(rad) * 20,
+                        self.y + self.height // 2 + math.cos(rad) * 20
+                    ])
+            else:  # Triple shot
+                for i in range(3):
+                    bullets.append([
+                        self.x + self.width // 2 + (i - 1) * 20,
+                        self.y + self.height
+                    ])
         return bullets
 
 # Game state
 class GameState:
-    def __init__(self):
-        self.level = 1
-        self.aliens_to_kill = 10  # Aliens needed to advance to next level
+    def __init__(self, start_level=1):
+        self.level = start_level
+        self.aliens_to_kill = 10 + (start_level - 1) * 5  # Adjust for starting level
         self.aliens_killed = 0
         self.level_complete = False
         self.game_over = False
@@ -116,6 +168,11 @@ class GameState:
         self.transition_duration = 2.0  # seconds
         self.boss_active = False
         self.boss = None
+
+        # If starting at a higher level, spawn boss if needed
+        if self.level % 3 == 0:
+            self.boss_active = True
+            self.boss = Boss(self.level)
 
     def advance_level(self):
         # Clear all game objects
@@ -159,8 +216,8 @@ class GameState:
     def get_alien_health(self):
         return 1 + (self.level - 1)  # Increase health with level
 
-# Initialize game state
-game_state = GameState()
+# Initialize game state with starting level
+game_state = GameState(args.level)
 
 # Player
 player_width, player_height = player_image.get_size()
@@ -338,6 +395,27 @@ while running:
 
             # Collision detection - Player bullets hitting aliens
             for bullet in bullets[:]:
+                # Check collision with boss first
+                if game_state.boss_active and game_state.boss and not game_state.boss.invulnerable:
+                    if (bullet[0] < game_state.boss.x + game_state.boss.width and
+                        bullet[0] > game_state.boss.x and
+                        bullet[1] < game_state.boss.y + game_state.boss.height and
+                        bullet[1] > game_state.boss.y):
+                        if bullet in bullets:
+                            bullets.remove(bullet)
+                        # Apply damage with visual feedback
+                        game_state.boss.health -= bullet_damage
+                        game_state.boss.hit_timer = 5  # Flash boss when hit
+                        if game_state.boss.health <= 0:
+                            game_state.boss_active = False
+                            game_state.score += 1000 * game_state.boss.phase  # More points for phase 2
+                            # Spawn more power-ups on boss death
+                            for _ in range(3 + game_state.boss.phase):  # More power-ups in phase 2
+                                power_ups.append(create_power_up())
+                            # Don't set level_complete here, wait for alien quota
+                        continue  # Skip alien collision check for this bullet
+                
+                # Original alien collision detection
                 for alien in aliens[:]:
                     if (bullet[0] < alien['x'] + alien_width and
                         bullet[0] > alien['x'] and
@@ -351,7 +429,9 @@ while running:
                                 aliens.remove(alien)
                                 game_state.aliens_killed += 1
                                 game_state.score += 100
-                                if game_state.aliens_killed >= game_state.aliens_to_kill:
+                                # Check for level completion only after alien kill
+                                if (game_state.aliens_killed >= game_state.aliens_to_kill and 
+                                    not game_state.boss_active):  # Boss must be defeated too
                                     game_state.level_complete = True
                         break
 
@@ -407,7 +487,17 @@ while running:
         
         # Draw boss if active
         if game_state.boss_active and game_state.boss:
-            screen.blit(boss_image, (game_state.boss.x, game_state.boss.y))
+            # Flash boss when hit or invulnerable
+            if game_state.boss.hit_timer > 0 or game_state.boss.invulnerable:
+                screen.blit(boss_image, (game_state.boss.x, game_state.boss.y))
+                color = RED if game_state.boss.hit_timer > 0 else YELLOW
+                pygame.draw.rect(screen, color, (game_state.boss.x, game_state.boss.y,
+                                             game_state.boss.width, game_state.boss.height), 2)
+                if game_state.boss.hit_timer > 0:
+                    game_state.boss.hit_timer -= 1
+            else:
+                screen.blit(boss_image, (game_state.boss.x, game_state.boss.y))
+            
             # Draw boss health bar
             health_width = 100
             health_height = 10
@@ -417,6 +507,10 @@ while running:
             pygame.draw.rect(screen, GREEN, (health_x, health_y,
                                            health_width * (game_state.boss.health / game_state.boss.max_health),
                                            health_height))
+            
+            # Draw phase indicator
+            phase_text = small_font.render(f'Phase {game_state.boss.phase}', True, WHITE)
+            screen.blit(phase_text, (health_x, health_y - 20))
         
         for alien in aliens:
             screen.blit(alien_image, (alien['x'], alien['y']))
